@@ -4,7 +4,11 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from database import save_wake_record
+from database import (
+    create_daily_attendance,
+    save_video_record,
+    save_wake_record,
+)
 
 WAKE_CHANNEL_ID = int(os.getenv("WAKE_CHANNEL_ID"))
 MORNING_CHANNEL_ID = int(os.getenv("MORNING_CHANNEL_ID"))
@@ -36,6 +40,10 @@ def setup_wake(bot):
 
         global wake_thread_id
         wake_thread_id = thread.thread.id
+
+        today = discord.utils.utcnow().astimezone(ZoneInfo("Asia/Seoul")).date()
+
+        create_daily_attendance(today)
 
         await interaction.response.send_message(
             f"☀️ 기상 인증 게시글을 생성했습니다!\n{thread.thread.jump_url}",
@@ -97,14 +105,12 @@ def setup_wake(bot):
 
             camera_on = voice.self_video
             screen_share_on = voice.self_stream
+            status = "참여" if (camera_on or screen_share_on) else "미참여"
 
-            participated = camera_on or screen_share_on
-
-            print(
-                f"{member.display_name} | "
-                f"카메라: {'ON' if camera_on else 'OFF'} | "
-                f"화면공유: {'ON' if screen_share_on else 'OFF'} | "
-                f"참여: {'O' if participated else 'X'}"
+            save_video_record(
+                date=discord.utils.utcnow().astimezone(ZoneInfo("Asia/Seoul")).date(),
+                discord_id=member.id,
+                status=status,
             )
 
         await interaction.response.send_message(
