@@ -1,9 +1,11 @@
-import sqlite3
 from datetime import date
 
 import discord
 
-from database import DB_NAME, calculate_final_attendance
+from services.attendance import (
+    calculate_final_attendance,
+    get_attendance,
+)
 
 
 def setup_attendance(bot):
@@ -50,23 +52,7 @@ def setup_attendance(bot):
             )
             return
 
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT users.name, attendance.wake_status,
-                   attendance.video_status, attendance.final_status
-            FROM attendance
-            JOIN users ON attendance.user_id = users.id
-            WHERE attendance.date = ?
-            ORDER BY users.name
-            """,
-            (target_date,),
-        )
-
-        records = cursor.fetchall()
-        conn.close()
+        records = get_attendance(target_date)
 
         if not records:
             await interaction.response.send_message(

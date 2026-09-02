@@ -137,3 +137,26 @@ def calculate_final_attendance(date):
 
     conn.commit()
     conn.close()
+
+
+def get_attendance(date):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT users.name, attendance.wake_status,
+               attendance.video_status, attendance.final_status
+        FROM attendance
+        JOIN users ON attendance.user_id = users.id
+        WHERE attendance.date = ?
+        ORDER BY users.name
+        """,
+        (date,),
+    )
+
+    records = cursor.fetchall()
+
+    conn.close()
+
+    return records
