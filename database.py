@@ -104,6 +104,22 @@ def save_wake_record(date, discord_id, name, status):
     else:
         user_id = user[0]
 
+    # 오늘 이미 기상 인증 기록이 있는지 확인
+    cursor.execute(
+        """
+        SELECT id
+        FROM attendance
+        WHERE date = ? AND user_id = ?
+        """,
+        (date, user_id),
+    )
+
+    record = cursor.fetchone()
+
+    if record is not None:
+        conn.close()
+        return
+
     # 기상 결과 저장
     cursor.execute(
         """
