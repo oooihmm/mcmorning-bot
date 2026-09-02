@@ -9,7 +9,6 @@ from discord.ext import commands
 
 from commands.attendance import setup_attendance
 from commands.member import setup_member
-from commands.wake import setup_wake
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -31,7 +30,6 @@ async def on_ready():
 
 
 setup_attendance(bot)
-setup_wake(bot)
 setup_member(bot)
 
 
