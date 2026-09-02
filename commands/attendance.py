@@ -19,6 +19,13 @@ wake_thread_id = None
 
 
 def setup_attendance(bot):
+    setup_wake(bot)
+    setup_video(bot)
+    setup_attendance_check(bot)
+    setup_leave(bot)
+
+
+def setup_wake(bot):
 
     @bot.tree.command(
         name="기상게시글",
@@ -89,6 +96,9 @@ def setup_attendance(bot):
 
         await bot.process_commands(message)
 
+
+def setup_video(bot):
+
     @bot.tree.command(
         name="스터디출첵",
         description="스터디 참여자를 확인합니다.",
@@ -118,6 +128,9 @@ def setup_attendance(bot):
         await interaction.response.send_message(
             f"🎥 현재 모닝 채널 참여자: {len(channel.members)}명"
         )
+
+
+def setup_attendance_check(bot):
 
     @bot.tree.command(
         name="출결판정",
@@ -181,3 +194,9 @@ def setup_attendance(bot):
             )
 
         await interaction.response.send_message("\n".join(result))
+
+
+def setup_leave(bot):
+
+    # 여기에 휴무 기능을 추가할 예정
+    pass
