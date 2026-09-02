@@ -1,4 +1,5 @@
 import sqlite3
+from typing import Literal
 
 import discord
 
@@ -57,4 +58,55 @@ def setup_member(bot):
 
         await interaction.response.send_message(
             f"✅ {member.display_name}님을 스터디 멤버로 등록했습니다."
+        )
+
+    @bot.tree.command(
+        name="멤버상태변경",
+        description="스터디 멤버의 상태를 변경합니다.",
+    )
+    async def change_member_status(
+        interaction: discord.Interaction,
+        member: discord.Member,
+        status: Literal["활성", "휴면", "강퇴"],
+    ):
+
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+
+        # 등록된 멤버인지 확인
+        cursor.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE discord_id = ?
+            """,
+            (member.id,),
+        )
+
+        user = cursor.fetchone()
+
+        if user is None:
+            conn.close()
+
+            await interaction.response.send_message(
+                f"❌ {member.display_name}님은 등록된 멤버가 아닙니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 상태 변경
+        cursor.execute(
+            """
+            UPDATE users
+            SET status = ?
+            WHERE discord_id = ?
+            """,
+            (status, member.id),
+        )
+
+        conn.commit()
+        conn.close()
+
+        await interaction.response.send_message(
+            f"✅ {member.display_name}님의 상태를 **{status}**으로 변경했습니다."
         )
