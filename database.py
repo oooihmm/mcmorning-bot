@@ -173,3 +173,49 @@ def save_video_record(date, discord_id, status):
 
     conn.commit()
     conn.close()
+
+
+def calculate_final_attendance(date):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # 해당 날짜의 출석 기록 조회
+    cursor.execute(
+        """
+        SELECT id, wake_status, video_status
+        FROM attendance
+        WHERE date = ?
+        """,
+        (date,),
+    )
+
+    records = cursor.fetchall()
+
+    for attendance_id, wake_status, video_status in records:
+        # 기상 또는 영상 참여 기록이 하나라도 없으면 결석
+        if wake_status is None or video_status is None:
+            final_status = "결석"
+
+        # 기상 + 영상 참여 → 출석
+        elif wake_status == "기상" and video_status == "참여":
+            final_status = "출석"
+
+        # 지각 + 영상 참여 → 지각
+        elif wake_status == "지각" and video_status == "참여":
+            final_status = "지각"
+
+        # 그 외 → 결석
+        else:
+            final_status = "결석"
+
+        cursor.execute(
+            """
+            UPDATE attendance
+            SET final_status = ?
+            WHERE id = ?
+            """,
+            (final_status, attendance_id),
+        )
+
+    conn.commit()
+    conn.close()
