@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo
 
 import discord
 
+from database import save_wake_record
+
 WAKE_CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
 wake_thread_id = None
@@ -66,5 +68,12 @@ def setup_wake(bot):
         else:
             status = "결석"
         print(f"기상 인증 결과: {status}")
+
+        save_wake_record(
+            date=kst_time.date(),
+            discord_id=message.author.id,
+            name=message.author.display_name,
+            status=status,
+        )
 
         await bot.process_commands(message)

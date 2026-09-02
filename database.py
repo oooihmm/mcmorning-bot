@@ -76,3 +76,42 @@ def create_tables():
 if __name__ == "__main__":
     create_tables()
     print("✅ DB 테이블 생성 완료!")
+
+
+def save_wake_record(date, discord_id, name, status):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # 유저 조회
+    cursor.execute(
+        "SELECT id FROM users WHERE discord_id = ?",
+        (discord_id,),
+    )
+
+    user = cursor.fetchone()
+
+    # 유저가 없으면 등록
+    if user is None:
+        cursor.execute(
+            """
+            INSERT INTO users (discord_id, name)
+            VALUES (?, ?)
+            """,
+            (discord_id, name),
+        )
+        user_id = cursor.lastrowid
+
+    else:
+        user_id = user[0]
+
+    # 기상 결과 저장
+    cursor.execute(
+        """
+        INSERT INTO attendance (date, user_id, wake_status)
+        VALUES (?, ?, ?)
+        """,
+        (date, user_id, status),
+    )
+
+    conn.commit()
+    conn.close()
