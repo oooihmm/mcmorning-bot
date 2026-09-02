@@ -78,55 +78,65 @@ if __name__ == "__main__":
     print("✅ DB 테이블 생성 완료!")
 
 
+def create_daily_attendance(date):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # 활성 멤버 조회
+    cursor.execute(
+        """
+        SELECT id
+        FROM users
+        WHERE status = '활성'
+        """
+    )
+
+    users = cursor.fetchall()
+
+    # 오늘 출석 기록 미리 생성
+    for (user_id,) in users:
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO attendance (date, user_id)
+            VALUES (?, ?)
+            """,
+            (date, user_id),
+        )
+
+    conn.commit()
+    conn.close()
+
+
 def save_wake_record(date, discord_id, name, status):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
     # 유저 조회
     cursor.execute(
-        "SELECT id FROM users WHERE discord_id = ?",
+        """
+        SELECT id
+        FROM users
+        WHERE discord_id = ?
+        """,
         (discord_id,),
     )
 
     user = cursor.fetchone()
 
-    # 유저가 없으면 등록
     if user is None:
-        cursor.execute(
-            """
-            INSERT INTO users (discord_id, name)
-            VALUES (?, ?)
-            """,
-            (discord_id, name),
-        )
-        user_id = cursor.lastrowid
-
-    else:
-        user_id = user[0]
-
-    # 오늘 이미 기상 인증 기록이 있는지 확인
-    cursor.execute(
-        """
-        SELECT id
-        FROM attendance
-        WHERE date = ? AND user_id = ?
-        """,
-        (date, user_id),
-    )
-
-    record = cursor.fetchone()
-
-    if record is not None:
         conn.close()
         return
 
-    # 기상 결과 저장
+    user_id = user[0]
+
+    # 기존 출석 기록의 기상 상태 업데이트
     cursor.execute(
         """
-        INSERT INTO attendance (date, user_id, wake_status)
-        VALUES (?, ?, ?)
+        UPDATE attendance
+        SET wake_status = ?
+        WHERE date = ? AND user_id = ?
         """,
-        (date, user_id, status),
+        (status, date, user_id),
     )
 
     conn.commit()
