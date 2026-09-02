@@ -1,13 +1,18 @@
 import os
 from datetime import date, time
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import discord
 
 from services.attendance import (
     calculate_final_attendance,
+    change_leave_status,
     create_daily_attendance,
+    create_leave,
     get_attendance,
+    get_leave,
+    get_pending_leaves,
     save_video_record,
     save_wake_record,
 )
@@ -198,5 +203,138 @@ def setup_attendance_check(bot):
 
 def setup_leave(bot):
 
-    # 여기에 휴무 기능을 추가할 예정
-    pass
+    @bot.tree.command(
+        name="휴무신청",
+        description="휴무를 신청합니다.",
+    )
+    async def request_leave(
+        interaction: discord.Interaction,
+        날짜: str,
+        유형: Literal[
+            "종일",
+            "반휴(늦게 참여)",
+            "반휴(일찍 퇴장)",
+            "기타",
+        ],
+        증빙: discord.Attachment | None = None,
+    ):
+        try:
+            target_date = date.fromisoformat(날짜)
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ 날짜는 `YYYY-MM-DD` 형식으로 입력해주세요.\n예: `2026-09-04`",
+                ephemeral=True,
+            )
+            return
+
+        # 기타 휴무는 증빙 필수
+        if 유형 == "기타" and 증빙 is None:
+            await interaction.response.send_message(
+                "❌ 기타 휴무는 증빙 자료를 첨부해야 합니다.",
+                ephemeral=True,
+            )
+            return
+
+        existing_leave = get_leave(
+            date=target_date,
+            discord_id=interaction.user.id,
+        )
+
+        if existing_leave is not None:
+            await interaction.response.send_message(
+                "❌ 해당 날짜에 이미 등록된 휴무가 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        evidence = 증빙.url if 증빙 else None
+
+        success, result = create_leave(
+            date=target_date,
+            discord_id=interaction.user.id,
+            leave_type=유형,
+            evidence=evidence,
+        )
+
+        if not success:
+            if result == "미등록":
+                message = "❌ 등록된 스터디 멤버가 아닙니다."
+
+            elif result == "주간한도초과":
+                message = "❌ 이번 주 휴무 한도를 초과했습니다."
+
+            else:
+                message = "❌ 휴무 신청에 실패했습니다."
+
+            await interaction.response.send_message(
+                message,
+                ephemeral=True,
+            )
+            return
+
+        if 유형 == "기타":
+            await interaction.response.send_message(
+                f"🏖️ {target_date} **{유형}** 휴무 신청이 완료되었습니다.\n"
+                "현재 상태: **대기**\n"
+                "관리자 승인 후 휴무가 확정됩니다."
+            )
+        else:
+            await interaction.response.send_message(
+                f"🏖️ {target_date} **{유형}** 휴무 신청이 완료되었습니다.\n"
+                "현재 상태: **승인**"
+            )
+
+    @bot.tree.command(
+        name="휴무관리",
+        description="대기 중인 휴무 신청을 확인합니다.",
+    )
+    async def manage_leave(interaction: discord.Interaction):
+        records = get_pending_leaves()
+
+        if not records:
+            await interaction.response.send_message(
+                "📋 현재 대기 중인 휴무 신청이 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        result = [
+            "📋 **대기 중인 휴무 신청**",
+            "",
+        ]
+
+        for leave_id, leave_date, name, leave_type, evidence in records:
+            result.append(f"`{leave_id}` | {leave_date} | **{name}** | {leave_type}")
+
+        result.append("")
+        result.append("`/휴무처리 신청id 결과`로 승인 또는 반려할 수 있습니다.")
+
+        await interaction.response.send_message(
+            "\n".join(result),
+            ephemeral=True,
+        )
+
+    @bot.tree.command(
+        name="휴무처리",
+        description="휴무 신청을 승인하거나 반려합니다.",
+    )
+    async def process_leave(
+        interaction: discord.Interaction,
+        신청id: int,
+        결과: Literal["승인", "반려"],
+    ):
+        success = change_leave_status(
+            leave_id=신청id,
+            status=결과,
+        )
+
+        if not success:
+            await interaction.response.send_message(
+                "❌ 대기 중인 휴무 신청을 찾을 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            f"✅ 휴무 신청 `{신청id}`을(를) **{결과}** 처리했습니다."
+        )

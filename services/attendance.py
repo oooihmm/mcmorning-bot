@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import timedelta
 
 from database import DB_NAME
 
@@ -160,3 +161,175 @@ def get_attendance(date):
     conn.close()
 
     return records
+
+
+def get_leave(date, discord_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT leaves.id, leaves.type, leaves.status, leaves.evidence
+        FROM leaves
+        JOIN users ON leaves.user_id = users.id
+        WHERE leaves.date = ?
+          AND users.discord_id = ?
+        """,
+        (date, discord_id),
+    )
+
+    leave = cursor.fetchone()
+
+    conn.close()
+
+    return leave
+
+
+def get_weekly_leave_amount(date, discord_id):
+    week_start = date - timedelta(days=date.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT leaves.type
+        FROM leaves
+        JOIN users ON leaves.user_id = users.id
+        WHERE users.discord_id = ?
+          AND leaves.date BETWEEN ? AND ?
+          AND leaves.status != '반려'
+        """,
+        (discord_id, week_start, week_end),
+    )
+
+    records = cursor.fetchall()
+
+    conn.close()
+
+    amount = 0.0
+
+    for (leave_type,) in records:
+        if leave_type == "종일":
+            amount += 1.0
+
+        elif leave_type in (
+            "반휴(늦게 참여)",
+            "반휴(일찍 퇴장)",
+        ):
+            amount += 0.5
+
+        # 기타 → 0
+        # 주간 한도에 포함하지 않음
+
+    return amount
+
+
+def create_leave(date, discord_id, leave_type, evidence=None):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT id
+        FROM users
+        WHERE discord_id = ?
+        """,
+        (discord_id,),
+    )
+
+    user = cursor.fetchone()
+
+    if user is None:
+        conn.close()
+        return False, "미등록"
+
+    user_id = user[0]
+
+    # 종일 / 반휴는 주간 한도 확인
+    if leave_type != "기타":
+        weekly_amount = get_weekly_leave_amount(
+            date=date,
+            discord_id=discord_id,
+        )
+
+        leave_amount = 1.0 if leave_type == "종일" else 0.5
+
+        if weekly_amount + leave_amount > 1.0:
+            conn.close()
+            return False, "주간한도초과"
+
+    status = "대기" if leave_type == "기타" else "승인"
+
+    cursor.execute(
+        """
+        INSERT INTO leaves (
+            date,
+            user_id,
+            type,
+            status,
+            evidence
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            date,
+            user_id,
+            leave_type,
+            status,
+            evidence,
+        ),
+    )
+
+    conn.commit()
+    conn.close()
+
+    return True, status
+
+
+def get_pending_leaves():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT leaves.id,
+               leaves.date,
+               users.name,
+               leaves.type,
+               leaves.evidence
+        FROM leaves
+        JOIN users ON leaves.user_id = users.id
+        WHERE leaves.status = '대기'
+        ORDER BY leaves.date, users.name
+        """
+    )
+
+    records = cursor.fetchall()
+
+    conn.close()
+
+    return records
+
+
+def change_leave_status(leave_id, status):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        UPDATE leaves
+        SET status = ?
+        WHERE id = ?
+          AND status = '대기'
+        """,
+        (status, leave_id),
+    )
+
+    success = cursor.rowcount > 0
+
+    conn.commit()
+    conn.close()
+
+    return success
