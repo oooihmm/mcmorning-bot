@@ -90,14 +90,23 @@ def setup_wake(bot):
             print("❌ 모닝 채널을 찾을 수 없습니다.")
             return
 
-        # 현재 음성 채널에 참여 중인 사람들
-        participants = channel.members
-
         print("🎥 영상 참여 확인!")
 
-        for member in participants:
-            print(f"참여: {member.display_name}")
+        for member in channel.members:
+            voice = member.voice
+
+            camera_on = voice.self_video
+            screen_share_on = voice.self_stream
+
+            participated = camera_on or screen_share_on
+
+            print(
+                f"{member.display_name} | "
+                f"카메라: {'ON' if camera_on else 'OFF'} | "
+                f"화면공유: {'ON' if screen_share_on else 'OFF'} | "
+                f"참여: {'O' if participated else 'X'}"
+            )
 
         await interaction.response.send_message(
-            f"🎥 현재 모닝 채널 참여자: {len(participants)}명"
+            f"🎥 현재 모닝 채널 참여자: {len(channel.members)}명"
         )
