@@ -1,7 +1,10 @@
 {
-  "python.REPL.enableREPLSmartSend": false,
-  "editor.defaultFormatter": "charliermarsh.ruff",
-  "editor.formatOnSave": true,
-  "jupyter.interactiveWindow.textEditor.executeSelection": false,
-  "interactiveWindow.executeWithShiftEnter": true
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  }
 }
