@@ -6,7 +6,8 @@ import discord
 
 from database import save_wake_record
 
-WAKE_CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+WAKE_CHANNEL_ID = int(os.getenv("WAKE_CHANNEL_ID"))
+MORNING_CHANNEL_ID = int(os.getenv("MORNING_CHANNEL_ID"))
 
 wake_thread_id = None
 
@@ -77,3 +78,26 @@ def setup_wake(bot):
         )
 
         await bot.process_commands(message)
+
+    @bot.tree.command(
+        name="스터디출첵",
+        description="스터디 참여자를 확인합니다.",
+    )
+    async def check_video_attendance(interaction):
+        channel = bot.get_channel(MORNING_CHANNEL_ID)
+
+        if channel is None:
+            print("❌ 모닝 채널을 찾을 수 없습니다.")
+            return
+
+        # 현재 음성 채널에 참여 중인 사람들
+        participants = channel.members
+
+        print("🎥 영상 참여 확인!")
+
+        for member in participants:
+            print(f"참여: {member.display_name}")
+
+        await interaction.response.send_message(
+            f"🎥 현재 모닝 채널 참여자: {len(participants)}명"
+        )
