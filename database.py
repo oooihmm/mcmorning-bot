@@ -131,3 +131,35 @@ def save_wake_record(date, discord_id, name, status):
 
     conn.commit()
     conn.close()
+
+
+def save_video_record(date, discord_id, status):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # 유저 조회
+    cursor.execute(
+        "SELECT id FROM users WHERE discord_id = ?",
+        (discord_id,),
+    )
+
+    user = cursor.fetchone()
+
+    if user is None:
+        conn.close()
+        return
+
+    user_id = user[0]
+
+    # 해당 날짜의 출석 기록에 영상 참여 결과 저장
+    cursor.execute(
+        """
+        UPDATE attendance
+        SET video_status = ?
+        WHERE date = ? AND user_id = ?
+        """,
+        (status, date, user_id),
+    )
+
+    conn.commit()
+    conn.close()
