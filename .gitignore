@@ -3,3 +3,9 @@
 */__pycache__
 .env
 mcmorning.db
+.bot.lock
+/data/
+*.db-wal
+*.db-shm
+*.bak
+/backups/

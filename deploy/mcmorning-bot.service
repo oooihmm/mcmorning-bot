@@ -1,0 +1,21 @@
+[Unit]
+Description=McMorning Discord Bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=mcmorning
+Group=mcmorning
+WorkingDirectory=/opt/mcmorning-bot
+EnvironmentFile=/opt/mcmorning-bot/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/mcmorning-bot/.venv/bin/python /opt/mcmorning-bot/bot.py
+Restart=always
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
