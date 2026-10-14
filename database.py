@@ -134,10 +134,16 @@ def create_tables():
             result TEXT NOT NULL, reason TEXT NOT NULL, actor_id INTEGER NOT NULL,
             created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS leave_windows (
+            start_date TEXT PRIMARY KEY, end_date TEXT NOT NULL, published_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS calendar_overrides (
             date TEXT PRIMARY KEY, is_holiday INTEGER NOT NULL, reason TEXT NOT NULL
         );
     """)
+    cursor.execute("""INSERT OR IGNORE INTO leave_windows(start_date,end_date,published_at)
+        SELECT date(date,'+2 days'), date(date,'+6 days'), updated_at FROM jobs
+        WHERE name='weekly_leave' AND status='done'""")
     conn.commit()
     conn.close()
 

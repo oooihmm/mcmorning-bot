@@ -133,6 +133,7 @@ class Automation:
         weekdays = [monday + timedelta(days=i) for i in range(5)]
         lines = [f'🏖️ {monday} ~ {weekdays[-1]} 휴무 신청',
                  '전일 1회 또는 반휴 2회 / 기타: 증빙 + 관리자 승인',
+                 '신청·취소는 가장 최근 안내 글의 월~금 기간에만 가능합니다.',
                  '/휴무신청, /휴무취소, /내휴무 명령을 사용해주세요.',
                  '신청·취소: 당일 08:30까지 / 기타 승인: 당일 10:00까지']
         lines += [f"{d} ({'신청 가능' if is_study_day(d) else '공휴일 — 스터디 없음'})" for d in weekdays]
@@ -141,6 +142,7 @@ class Automation:
             await self.forum_post(channel, f'🏖️ {monday} 주간 휴무 신청', '\n'.join(lines))
         else:
             await self.send_once(channel, day, 'weekly_leave', '\n'.join(lines))
+        store.open_leave_window(day)
         store.mark_job(day, 'weekly_leave')
 
     def capture_slot(self, day, slot, now):

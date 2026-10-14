@@ -76,8 +76,56 @@ def _weekly_units(db, day, user_id):
     return sum(2 if row[0] == FULL else 0 if row[0] == OTHER else 1 for row in rows)
 
 
+def open_leave_window(saturday, published_at=None):
+    monday = saturday + timedelta(days=2)
+    with connect() as db:
+        db.execute('INSERT OR IGNORE INTO leave_windows VALUES (?,?,?)',
+                   (monday, monday + timedelta(days=4), timestamp(published_at or now_kst())))
+
+
+def current_leave_window(now=None):
+    with connect() as db:
+        row = db.execute('SELECT start_date,end_date FROM leave_windows WHERE published_at<=? ORDER BY start_date DESC LIMIT 1',
+                         (timestamp(now or now_kst()),)).fetchone()
+    return (Date.fromisoformat(row[0]), Date.fromisoformat(row[1])) if row else None
+
+
+def available_leave_dates(now=None):
+    now = now or now_kst()
+    window = current_leave_window(now)
+    if window is None:
+        return []
+    return [window[0] + timedelta(days=i) for i in range(5)
+            if now < at(window[0] + timedelta(days=i), 8, 31)
+            and is_study_day(window[0] + timedelta(days=i))]
+
+
+def _in_current_window(day, now):
+    window = current_leave_window(now)
+    return window is not None and window[0] <= day <= window[1]
+
+
+def current_leaves(discord_id, now=None):
+    window = current_leave_window(now)
+    if window is None:
+        return []
+    with connect() as db:
+        return db.execute("""SELECT l.*,u.name FROM leaves l JOIN users u ON u.id=l.user_id
+            WHERE u.discord_id=? AND l.date BETWEEN ? AND ? ORDER BY l.date,l.id""",
+            (discord_id,window[0],window[1])).fetchall()
+
+
+def cancellable_leaves(discord_id, now=None):
+    now = now or now_kst()
+    return [r for r in current_leaves(discord_id, now) if r['status'] in ('승인','대기')
+            and _in_current_window(Date.fromisoformat(r['date']),now)
+            and now < at(Date.fromisoformat(r['date']),8,31)]
+
+
 def create_leave(day, discord_id, leave_type, evidence=None, now=None):
     now = now or now_kst()
+    if not _in_current_window(day, now):
+        return False, '가장 최근 주간 휴무 안내의 기간에만 신청할 수 있습니다.'
     if leave_type not in LEAVE_TYPES:
         return False, '잘못된 휴무 유형입니다.'
     if now >= at(day, 8, 31):
@@ -109,14 +157,18 @@ def create_leave(day, discord_id, leave_type, evidence=None, now=None):
     return True, status
 
 
-def cancel_leave(day, discord_id, now=None):
+def cancel_leave(day, discord_id, now=None, expected_requested_at=None):
     now = now or now_kst()
+    if not _in_current_window(day, now):
+        return False, '현재 주간 휴무 신청 기간의 휴무만 취소할 수 있습니다.'
     if now >= at(day, 8, 31):
         return False, '당일 08:30까지 취소할 수 있습니다.'
     with connect() as db:
-        row = db.execute("SELECT id FROM leaves WHERE date=? AND user_id=(SELECT id FROM users WHERE discord_id=?) AND status NOT IN ('취소','반려')", (day, discord_id)).fetchone()
+        row = db.execute("SELECT id,requested_at FROM leaves WHERE date=? AND user_id=(SELECT id FROM users WHERE discord_id=?) AND status NOT IN ('취소','반려')", (day, discord_id)).fetchone()
         if not row:
             return False, '취소할 휴무 신청이 없습니다.'
+        if expected_requested_at is not None and row['requested_at'] != expected_requested_at:
+            return False, '신청 내역이 변경되었습니다. /휴무취소를 다시 실행해주세요.'
         db.execute("UPDATE leaves SET status='취소' WHERE id=?", (row[0],))
         db.execute('INSERT INTO leave_events(leave_id,action,actor_id,created_at) VALUES (?,?,?,?)', (row[0], '취소', discord_id, timestamp(now)))
     return True, '취소'
