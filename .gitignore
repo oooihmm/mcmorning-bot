@@ -9,3 +9,5 @@ mcmorning.db
 *.db-shm
 *.bak
 /backups/
+
+/test-discord.db
