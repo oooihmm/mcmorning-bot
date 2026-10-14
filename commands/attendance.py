@@ -3,7 +3,7 @@ from typing import Literal
 import discord
 from discord import app_commands
 from commands.leave_management import LeaveManagementView
-from commands.leave_self_service import LeaveRequestView, LeaveCancelView
+from commands.leave_self_service import PersonalLeaveView, LeaveDetailsModal, LeaveCancelView
 
 from database import connect
 from services import attendance as store
@@ -45,14 +45,12 @@ def setup_attendance(bot):
         await interaction.followup.send(f'☀️ <#{thread_id}>', ephemeral=True)
 
     @bot.tree.command(name='휴무신청', description='현재 주간 신청 기간에서 날짜를 선택해 휴무를 신청합니다.')
-    async def request_leave(interaction: discord.Interaction,
-        유형: Literal['종일','반휴(늦게 참여)','반휴(일찍 퇴장)','기타'], 증빙: discord.Attachment | None = None):
-        if 유형 == '기타' and 증빙 is None:
-            await interaction.response.send_message('기타 휴무는 증빙 파일을 첨부해주세요.', ephemeral=True)
+    async def request_leave(interaction: discord.Interaction):
+        if not store.available_leave_dates():
+            await interaction.response.send_message('현재 주간 안내 기간에 신청 가능한 날짜가 없습니다.', ephemeral=True)
             return
-        view = LeaveRequestView(interaction.guild_id, interaction.user.id, 유형, 증빙.url if 증빙 else None)
-        await interaction.response.send_message('날짜를 선택하고 휴무 신청 버튼을 눌러주세요.' if not view.choose_date.disabled else '현재 주간 안내 기간에 신청 가능한 날짜가 없습니다.', view=view, ephemeral=True)
-        view.message = await interaction.original_response()
+        source = PersonalLeaveView(interaction.guild_id, interaction.user.id)
+        await interaction.response.send_modal(LeaveDetailsModal(source))
 
     @bot.tree.command(name='휴무취소', description='현재 주간 신청 기간의 내 휴무를 선택해 취소합니다.')
     async def cancel_leave(interaction: discord.Interaction):
