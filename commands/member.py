@@ -1,6 +1,7 @@
 from typing import Literal
 
 import discord
+from commands.attendance import admin_command
 
 from services.member import (
     change_member_status,
@@ -15,6 +16,7 @@ def setup_member(bot):
         name="멤버등록",
         description="스터디 멤버를 등록합니다.",
     )
+    @admin_command
     async def register_member_command(
         interaction: discord.Interaction,
         member: discord.Member,
@@ -43,6 +45,7 @@ def setup_member(bot):
         name="멤버상태변경",
         description="스터디 멤버의 상태를 변경합니다.",
     )
+    @admin_command
     async def change_member_status_command(
         interaction: discord.Interaction,
         member: discord.Member,
