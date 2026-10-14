@@ -7,7 +7,7 @@ import unittest
 
 import database
 from commands.leave_management import LeaveManagementView
-from commands.leave_self_service import LeaveRequestView, LeaveCancelView
+from commands.leave_self_service import LeaveRequestView, LeaveCancelView, LeaveDetailsModal
 from services import attendance as store
 from services.rules import OTHER, at
 
@@ -46,13 +46,86 @@ class LeaveManagementTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_self_service_date_options_and_ownership(self):
         with patch('services.attendance.now_kst',return_value=at(DAY,7)):
-            view = LeaveRequestView(1,123,OTHER,'https://example.com/evidence.png')
+            view = LeaveRequestView(1,123)
             self.assertEqual([o.value for o in view.choose_date.options],['2026-10-14','2026-10-15','2026-10-16'])
             self.assertTrue(view.submit.disabled)
             interaction = self.interaction()
             self.assertFalse(await view.interaction_check(interaction))
             interaction.user.id=123
             self.assertTrue(await view.interaction_check(interaction))
+            view.stop()
+
+    async def test_request_selection_stays_visible_and_can_be_changed(self):
+        view = LeaveRequestView(1,123)
+        interaction = self.interaction()
+        for value in ['2026-10-15','2026-10-16']:
+            view.choose_date._values = [value]
+            await view.choose_date.callback(interaction)
+            self.assertEqual([o.value for o in view.choose_date.options if o.default],[value])
+        interaction.response.send_modal = AsyncMock()
+        await view.submit.callback(interaction)
+        modal = interaction.response.send_modal.call_args.args[0]
+        self.assertEqual(modal.day,date(2026,10,16))
+        self.assertEqual(len(modal.children),2)
+        self.assertIsNone(store.get_leave(date(2026,10,16),123))
+        interaction.response.edit_message.assert_called_with(view=view)
+        modal.stop()
+        view.stop()
+
+    async def test_modal_other_requires_evidence_before_writing(self):
+        view = LeaveRequestView(1,123)
+        modal = LeaveDetailsModal(view,date(2026,10,16))
+        modal.leave_type._values = [OTHER]
+        interaction = self.interaction()
+        await modal.on_submit(interaction)
+        self.assertIsNone(store.get_leave(date(2026,10,16),123))
+        self.assertIn('증빙',interaction.response.send_message.call_args.args[0])
+        modal.evidence._values = [SimpleNamespace(url='https://example.com/proof.png')]
+        await modal.on_submit(interaction)
+        self.assertEqual(store.get_leave(date(2026,10,16),123)['status'],'대기')
+        modal.stop()
+        view.stop()
+
+    async def test_single_form_collects_date_type_and_file(self):
+        view = LeaveRequestView(1,123)
+        modal = LeaveDetailsModal(view)
+        self.assertEqual(len(modal.children),3)
+        modal.choose_date._values = ['2026-10-16']
+        modal.leave_type._values = [OTHER]
+        modal.evidence._values = [SimpleNamespace(url='https://example.com/proof.png')]
+        interaction = self.interaction()
+        await modal.on_submit(interaction)
+        self.assertEqual(store.get_leave(date(2026,10,16),123)['status'],'대기')
+        interaction.response.send_message.assert_awaited_once()
+        modal.stop()
+        view.stop()
+
+    async def test_success_updates_original_message_without_duplicate(self):
+        view = LeaveRequestView(1,123)
+        view.message = SimpleNamespace(edit=AsyncMock())
+        modal = LeaveDetailsModal(view,date(2026,10,16))
+        modal.leave_type._values = ['종일']
+        interaction = self.interaction()
+        await modal.on_submit(interaction)
+        interaction.response.edit_message.assert_awaited_once()
+        interaction.response.send_message.assert_not_awaited()
+        view.message.edit.assert_not_awaited()
+        modal.stop()
+        view.stop()
+
+    async def test_cancel_selection_stays_visible_and_uses_latest_choice(self):
+        with patch('services.attendance.now_kst',return_value=at(DAY,7)):
+            view = LeaveCancelView(1,123)
+            interaction = self.interaction()
+            for key in view.rows:
+                view.choose_leave._values = [key]
+                await view.choose_leave.callback(interaction)
+                self.assertEqual([o.value for o in view.choose_leave.options if o.default],[key])
+            selected_day = date.fromisoformat(view.selected['date'])
+            await view.cancel.callback(interaction)
+            self.assertIsNone(store.get_leave(selected_day,123))
+            other_day = DAY if selected_day != DAY else DAY+timedelta(days=1)
+            self.assertIsNotNone(store.get_leave(other_day,123))
             view.stop()
 
     async def test_cancel_only_shows_own_current_open_requests(self):
