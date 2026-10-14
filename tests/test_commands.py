@@ -28,9 +28,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         guild=discord.Object(id=1)
         bot.tree.copy_global_to(guild=guild)
         bot.tree.clear_commands(guild=None)
-        self.assertEqual(len(bot.tree.get_commands(guild=guild)),13)
+        self.assertEqual(len(bot.tree.get_commands(guild=guild)),11)
         self.assertEqual(len(bot.tree.get_commands()),0)
-        admin_names = {'기상게시글','휴무관리','휴무처리','출결판정','출결정정','휴일설정','멤버등록','멤버상태변경'}
+        admin_names = {'기상게시글','휴무관리','출결판정','출결정정','멤버등록','멤버상태변경'}
         for command in bot.tree.get_commands(guild=guild):
             if command.name in admin_names:
                 self.assertTrue(command.checks,command.name)

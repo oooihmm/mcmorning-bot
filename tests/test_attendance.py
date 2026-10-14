@@ -51,6 +51,7 @@ class DatabaseTests(unittest.TestCase):
         self.old_path = database.DB_NAME
         database.DB_NAME = str(Path(self.tmp.name)/'test.db')
         database.create_tables()
+        store.open_leave_window(DAY-timedelta(days=(DAY.weekday()-5)%7),at(DAY-timedelta(days=(DAY.weekday()-5)%7),10))
         with database.connect() as db:
             db.execute("INSERT INTO users(discord_id,name) VALUES (123,'멤버')")
         self.request_time = at(DAY-timedelta(days=1),12)
@@ -70,6 +71,53 @@ class DatabaseTests(unittest.TestCase):
         store.save_video_snapshot(day,'08:35',{123} if normal else set(),at(day,8,35))
         store.save_video_snapshot(day,'09:35',{123} if late else set(),at(day,9,35))
         store.mark_job(day,'wake_history')
+
+    def test_no_published_window_blocks_request(self):
+        with database.connect() as db:
+            db.execute('DELETE FROM leave_windows')
+        self.assertFalse(self.leave()[0])
+
+    def test_only_latest_published_window_can_be_used(self):
+        future = date(2026,10,19)
+        self.assertFalse(self.leave(FULL,future)[0])
+        self.leave()
+        published = at(date(2026,10,17),10)
+        store.open_leave_window(date(2026,10,17),published)
+        self.assertEqual(store.current_leave_window(published),(future,date(2026,10,23)))
+        self.assertTrue(store.create_leave(future,123,FULL,now=published)[0])
+        self.assertFalse(store.cancel_leave(DAY,123,published)[0])
+        self.assertFalse(store.create_leave(date(2026,10,26),123,FULL,now=published)[0])
+
+    def test_available_dates_exclude_holidays_and_cutoff(self):
+        set_holiday(DAY+timedelta(days=1),True,'휴일')
+        self.assertEqual(store.available_leave_dates(at(DAY,8,30)),[DAY,DAY+timedelta(days=2)])
+        self.assertEqual(store.available_leave_dates(at(DAY,8,31)),[DAY+timedelta(days=2)])
+
+    def test_stale_cancel_cannot_cancel_reapplied_request(self):
+        self.leave()
+        old = store.get_leave(DAY,123)['requested_at']
+        store.cancel_leave(DAY,123,self.request_time)
+        self.leave(LATE,now=self.request_time+timedelta(minutes=1))
+        self.assertFalse(store.cancel_leave(DAY,123,self.request_time+timedelta(minutes=2),expected_requested_at=old)[0])
+        self.assertEqual(store.get_leave(DAY,123)['type'],LATE)
+
+    def test_current_leaves_scoped_to_owner_and_published_period(self):
+        with database.connect() as db:
+            db.execute("INSERT INTO users(discord_id,name) VALUES (456,'다른 멤버')")
+            for day,status in [(date(2026,10,5),'승인'),(date(2026,10,12),'취소'),(date(2026,10,13),'반려'),(DAY,'대기'),(date(2026,10,15),'승인'),(date(2026,10,19),'승인')]:
+                db.execute('INSERT INTO leaves(date,user_id,type,status) VALUES (?,1,?,?)',(day,OTHER,status))
+            db.execute("INSERT INTO leaves(date,user_id,type,status) VALUES (?,2,'기타','승인')",(DAY,))
+        rows=store.current_leaves(123,at(DAY,9))
+        self.assertEqual([r['status'] for r in rows],['취소','반려','대기','승인'])
+        store.open_leave_window(date(2026,10,17),at(date(2026,10,17),10))
+        rows=store.current_leaves(123,at(date(2026,10,17),10))
+        self.assertEqual([r['date'] for r in rows],['2026-10-19'])
+
+    def test_current_leaves_hidden_until_weekly_post_exists(self):
+        self.leave()
+        with database.connect() as db:
+            db.execute('DELETE FROM leave_windows')
+        self.assertEqual(store.current_leaves(123,self.request_time),[])
 
     def test_full_leave_excluded(self):
         self.assertTrue(self.leave()[0])
