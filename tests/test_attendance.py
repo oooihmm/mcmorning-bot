@@ -301,6 +301,17 @@ class DatabaseTests(unittest.TestCase):
         auto.finalize.assert_awaited_once_with(DAY)
         auto.report.assert_awaited_once_with(DAY)
 
+    def test_first_start_after_study_without_thread_skips_report_once(self):
+        auto=Automation(SimpleNamespace(is_ready=lambda:True),None)
+        auto.sync_leave_notice=AsyncMock()
+        auto.clean_legacy_markers=AsyncMock()
+        store.mark_job(DAY-timedelta(days=(DAY.weekday()-5)%7),'weekly_leave')
+        with patch('services.attendance.now_kst',return_value=at(DAY,11)):
+            asyncio.run(auto.tick(at(DAY,11)))
+            asyncio.run(auto.tick(at(DAY,11,1)))
+        self.assertEqual(store.job_status(DAY,'report_body'),'skipped')
+        self.assertEqual(store.get_penalties(DAY)[0]['total'],0)
+
     def test_holiday_tick_no_attendance(self):
         auto = Automation(SimpleNamespace(is_ready=lambda: True),None)
         auto.sync_leave_notice = AsyncMock()
@@ -365,10 +376,9 @@ class DatabaseTests(unittest.TestCase):
     def test_report_without_thread_does_not_create_post(self):
         auto = Automation(SimpleNamespace(),SimpleNamespace(guild_id=1,wake_channel_id=2))
         auto.send_once = AsyncMock()
-        with self.assertRaises(RuntimeError):
-            asyncio.run(auto.report(DAY))
+        asyncio.run(auto.report(DAY))
         auto.send_once.assert_not_awaited()
-        self.assertIsNone(store.job_status(DAY,'report'))
+        self.assertEqual(store.job_status(DAY,'report_body'),'skipped')
 
     def test_report_rejects_thread_from_other_forum(self):
         store.save_thread(DAY,456)
