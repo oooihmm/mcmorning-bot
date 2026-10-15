@@ -134,6 +134,16 @@ def create_tables():
             result TEXT NOT NULL, reason TEXT NOT NULL, actor_id INTEGER NOT NULL,
             created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS sent_messages (
+            date TEXT NOT NULL, channel_id INTEGER NOT NULL, key TEXT NOT NULL,
+            message_id INTEGER NOT NULL,
+            PRIMARY KEY(date,channel_id,key)
+        );
+        CREATE TABLE IF NOT EXISTS leave_notices (
+            date TEXT NOT NULL, channel_id INTEGER NOT NULL, page INTEGER NOT NULL,
+            message_id INTEGER NOT NULL, content TEXT NOT NULL,
+            PRIMARY KEY(date,channel_id,page)
+        );
         CREATE TABLE IF NOT EXISTS leave_windows (
             start_date TEXT PRIMARY KEY, end_date TEXT NOT NULL, published_at TEXT NOT NULL
         );
