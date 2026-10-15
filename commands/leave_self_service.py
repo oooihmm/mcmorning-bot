@@ -71,10 +71,16 @@ class LeaveDetailsModal(discord.ui.Modal):
         if day is None:
             self.choose_date = discord.ui.Select(
                 placeholder="휴무 날짜를 선택하세요",
-                options=[discord.SelectOption(label=day_label(value), value=value.isoformat())
-                         for value in store.available_leave_dates()],
+                options=[
+                    discord.SelectOption(
+                        label=day_label(value), value=value.isoformat()
+                    )
+                    for value in store.available_leave_dates()
+                ],
             )
-            self.add_item(discord.ui.Label(text="휴무 날짜", component=self.choose_date))
+            self.add_item(
+                discord.ui.Label(text="휴무 날짜", component=self.choose_date)
+            )
         self.leave_type = discord.ui.Select(
             placeholder="휴무 유형을 선택하세요",
             options=[
