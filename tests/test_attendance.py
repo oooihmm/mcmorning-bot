@@ -273,6 +273,8 @@ class DatabaseTests(unittest.TestCase):
 
     def test_ordinary_tick_does_not_create_goal_tasks(self):
         auto = Automation(SimpleNamespace(is_ready=lambda: True),None)
+        auto.sync_leave_notice = AsyncMock()
+        auto.clean_legacy_markers = AsyncMock()
         saturday = DAY-timedelta(days=(DAY.weekday()-5)%7)
         store.mark_job(saturday,'weekly_leave')
         auto._ensure_wake = AsyncMock()
@@ -283,6 +285,8 @@ class DatabaseTests(unittest.TestCase):
 
     def test_final_and_report_retry_without_repeating_final(self):
         auto = Automation(SimpleNamespace(is_ready=lambda: True),None)
+        auto.sync_leave_notice = AsyncMock()
+        auto.clean_legacy_markers = AsyncMock()
         saturday = DAY-timedelta(days=(DAY.weekday()-5)%7)
         store.mark_job(saturday,'weekly_leave')
         async def finalize(day):
@@ -298,6 +302,8 @@ class DatabaseTests(unittest.TestCase):
 
     def test_holiday_tick_no_attendance(self):
         auto = Automation(SimpleNamespace(is_ready=lambda: True),None)
+        auto.sync_leave_notice = AsyncMock()
+        auto.clean_legacy_markers = AsyncMock()
         store.mark_job(DAY-timedelta(days=(DAY.weekday()-5)%7),'weekly_leave')
         set_holiday(DAY,True,'임시휴일')
         auto._ensure_wake = AsyncMock()
@@ -342,8 +348,91 @@ class DatabaseTests(unittest.TestCase):
             asyncio.run(auto.report(DAY))
         auto.send_once.assert_not_awaited()
 
+    def test_weekly_text_notice_updates_same_message_on_leave_changes(self):
+        messages = []
+        async def history(**kwargs):
+            for message in messages:
+                yield message
+        async def send(content,**kwargs):
+            message = SimpleNamespace(id=len(messages)+1,content=content,author=SimpleNamespace(id=999))
+            async def edit(content,**kwargs):
+                message.content=content
+            message.edit=AsyncMock(side_effect=edit)
+            messages.append(message)
+            return message
+        channel = SimpleNamespace(id=77,history=history,send=AsyncMock(side_effect=send),fetch_message=AsyncMock(side_effect=lambda key: messages[key-1]))
+        auto = Automation(SimpleNamespace(user=SimpleNamespace(id=999)),SimpleNamespace(leave_channel_id=77))
+        auto.channel = lambda *args: channel
+        saturday = date(2026,10,10)
+        asyncio.run(auto.sync_leave_notice(saturday))
+        self.assertIn('## 🌴 휴무 신청',messages[0].content)
+        self.assertNotIn('[맥집사:',messages[0].content)
+        self.assertIn('**10월 12일 ~ 10월 16일**',messages[0].content)
+        self.leave(OTHER)
+        asyncio.run(auto.sync_leave_notice(saturday))
+        self.assertIn('멤버 · 기타 휴무 ⏳ 승인 대기',messages[0].content)
+        self.assertNotIn('evidence',messages[0].content)
+        row=store.get_leave(DAY,123)
+        store.change_leave_status(row['id'],'승인',999,at(DAY,9))
+        asyncio.run(auto.sync_leave_notice(saturday))
+        self.assertNotIn('⏳',messages[0].content)
+        store.cancel_leave(DAY,123,at(DAY,8))
+        asyncio.run(auto.sync_leave_notice(saturday))
+        self.assertNotIn('멤버 · 기타 휴무',messages[0].content)
+        count=messages[0].edit.await_count
+        asyncio.run(auto.sync_leave_notice(saturday))
+        self.assertEqual(messages[0].edit.await_count,count)
+        self.assertEqual(channel.send.await_count,1)
+
+    def test_weekly_notice_splits_large_roster_and_hides_rejected(self):
+        self.leave(OTHER)
+        row=store.get_leave(DAY,123)
+        store.change_leave_status(row['id'],'반려',999,at(DAY,9))
+        with database.connect() as db:
+            for number in range(100):
+                user=db.execute('INSERT INTO users(discord_id,name) VALUES (?,?)',(1000+number,'긴이름의참여자'+str(number))).lastrowid
+                db.execute('INSERT INTO leaves(date,user_id,type,status) VALUES (?,?,?,?)',(DAY,user,FULL,'승인'))
+        pages=Automation(None,None).leave_notice_pages(date(2026,10,10))
+        self.assertGreater(len(pages),1)
+        self.assertTrue(all(len(page)<=1800 for page in pages))
+        self.assertNotIn('멤버 · 기타 휴무',''.join(pages))
+
+    def test_send_once_has_no_visible_marker_and_recovers_without_duplicate(self):
+        messages=[]
+        async def history(**kwargs):
+            for item in messages:
+                yield item
+        async def send(content,**kwargs):
+            message=SimpleNamespace(id=len(messages)+1,content=content,author=SimpleNamespace(id=999))
+            messages.append(message)
+            return message
+        channel=SimpleNamespace(id=88,history=history,send=AsyncMock(side_effect=send))
+        auto=Automation(SimpleNamespace(user=SimpleNamespace(id=999)),None)
+        asyncio.run(auto.send_once(channel,DAY,'result_0','출결 결과'))
+        self.assertEqual(messages[0].content,'출결 결과')
+        with database.connect() as db:
+            db.execute('DELETE FROM sent_messages')
+        asyncio.run(auto.send_once(channel,DAY,'result_0','출결 결과'))
+        asyncio.run(auto.send_once(channel,DAY,'result_0','출결 결과'))
+        self.assertEqual(channel.send.await_count,1)
+
+    def test_legacy_cleanup_removes_only_bot_markers(self):
+        marker=f'내용\n[맥집사:{DAY}:result_0]'
+        bot_message=SimpleNamespace(content=marker,author=SimpleNamespace(id=999),edit=AsyncMock())
+        user_message=SimpleNamespace(content=marker,author=SimpleNamespace(id=123),edit=AsyncMock())
+        async def history(**kwargs):
+            for message in [bot_message,user_message]:
+                yield message
+        channel=SimpleNamespace(guild=SimpleNamespace(id=1),history=history)
+        auto=Automation(SimpleNamespace(user=SimpleNamespace(id=999),get_channel=lambda _:channel),SimpleNamespace(guild_id=1,leave_channel_id=77))
+        asyncio.run(auto.clean_legacy_markers())
+        self.assertEqual(bot_message.edit.call_args.kwargs['content'],'내용')
+        user_message.edit.assert_not_awaited()
+
     def test_weekend_tick_only_weekly_post(self):
         auto = Automation(SimpleNamespace(is_ready=lambda: True),None)
+        auto.sync_leave_notice = AsyncMock()
+        auto.clean_legacy_markers = AsyncMock()
         auto.weekly_leave = AsyncMock()
         auto._ensure_wake = AsyncMock()
         auto.finalize = AsyncMock()
