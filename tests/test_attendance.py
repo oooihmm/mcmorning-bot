@@ -293,6 +293,7 @@ class DatabaseTests(unittest.TestCase):
             store.mark_job(day,'final')
         async def report(day):
             store.mark_job(day,'report')
+            store.mark_job(day,'report_body')
         auto.finalize = AsyncMock(side_effect=finalize)
         auto.report = AsyncMock(side_effect=report)
         asyncio.run(auto.tick(at(DAY,10,30)))
@@ -313,21 +314,53 @@ class DatabaseTests(unittest.TestCase):
         auto.finalize.assert_not_awaited()
         self.assertEqual(store.get_attendance(DAY),[])
 
-    def test_report_replies_to_daily_wake_thread_after_restart(self):
+    def test_report_edits_starter_instead_of_reply_after_restart(self):
         store.save_thread(DAY,456)
         thread = MagicMock(spec=discord.Thread)
+        thread.id = 456
+        thread.name = '10월 14일 기상 인증'
         thread.guild = SimpleNamespace(id=1)
         thread.parent_id = 2
         thread.archived = True
         thread.edit = AsyncMock()
-        bot = SimpleNamespace(get_channel=lambda _: None, fetch_channel=AsyncMock(return_value=thread))
+        starter = SimpleNamespace(author=SimpleNamespace(id=999),edit=AsyncMock())
+        thread.fetch_message = AsyncMock(return_value=starter)
+        bot = SimpleNamespace(user=SimpleNamespace(id=999),get_channel=lambda _: None, fetch_channel=AsyncMock(return_value=thread))
         auto = Automation(bot,SimpleNamespace(guild_id=1,wake_channel_id=2))
         auto.send_once = AsyncMock()
         asyncio.run(auto.report(DAY))
         bot.fetch_channel.assert_awaited_once_with(456)
         thread.edit.assert_awaited_once_with(archived=False)
-        self.assertIs(auto.send_once.call_args.args[0],thread)
-        self.assertEqual(store.job_status(DAY,'report'),'done')
+        thread.fetch_message.assert_awaited_once_with(456)
+        starter.edit.assert_awaited_once()
+        self.assertIn('### 출결 확인',starter.edit.call_args.kwargs['content'])
+        auto.send_once.assert_not_awaited()
+        self.assertEqual(store.job_status(DAY,'report_body'),'done')
+
+    def test_wake_template_and_random_mission_persist_for_day(self):
+        from services.wake import MISSIONS,wake_body,wake_title
+        with patch('services.wake.random.choice',return_value='👌🏻 (오케이)') as choose:
+            body=wake_body(DAY)
+            self.assertEqual(wake_body(DAY),body)
+            choose.assert_called_once()
+        self.assertEqual(wake_title(DAY),'10월 14일 기상 인증')
+        self.assertIn('> # 👌🏻 (오케이)',body)
+        self.assertTrue(body.endswith('### 출결 확인\n'))
+        self.assertIn('**촬영 시간이 보이도록**',body)
+        self.assertEqual(len(MISSIONS),13)
+
+    def test_same_title_from_prior_year_is_not_reused(self):
+        from services.wake import wake_title
+        old=SimpleNamespace(name=wake_title(DAY),owner_id=999,created_at=at(date(2025,10,14),6))
+        async def archived(**kwargs):
+            if False:
+                yield None
+        new=SimpleNamespace(id=888)
+        channel=SimpleNamespace(threads=[old],archived_threads=archived,create_thread=AsyncMock(return_value=SimpleNamespace(thread=new)))
+        auto=Automation(SimpleNamespace(user=SimpleNamespace(id=999)),None)
+        found=asyncio.run(auto.forum_post(channel,wake_title(DAY),'내용',post_day=DAY))
+        self.assertIs(found,new)
+        channel.create_thread.assert_awaited_once()
 
     def test_report_without_thread_does_not_create_post(self):
         auto = Automation(SimpleNamespace(),SimpleNamespace(guild_id=1,wake_channel_id=2))
