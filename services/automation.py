@@ -378,7 +378,9 @@ class Automation:
     async def report(self, day):
         thread_id = store.get_thread(day)
         if thread_id is None:
-            raise RuntimeError(f'{day} 기상 인증 게시글이 없어 출결을 작성할 수 없습니다.')
+            store.mark_job(day, 'report_body', 'skipped', '기상 인증 게시글 연결 없음')
+            log.warning('%s 기상 인증 게시글 연결이 없어 출결 본문 작성을 건너뜁니다.', day)
+            return
         thread = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
         if (not isinstance(thread,discord.Thread) or thread.guild.id != self.settings.guild_id
                 or thread.parent_id != self.settings.wake_channel_id):
@@ -465,7 +467,7 @@ class Automation:
                     )
                 if (
                     store.job_status(target, "final") == "done"
-                    and store.job_status(target, "report_body") != "done"
+                    and store.job_status(target, "report_body") not in ("done", "skipped")
                 ):
                     await self.run_step(
                         f"report:{target}", lambda d=target: self.report(d)
