@@ -134,6 +134,9 @@ def create_tables():
             result TEXT NOT NULL, reason TEXT NOT NULL, actor_id INTEGER NOT NULL,
             created_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS wake_missions (
+            date TEXT PRIMARY KEY, mission TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS sent_messages (
             date TEXT NOT NULL, channel_id INTEGER NOT NULL, key TEXT NOT NULL,
             message_id INTEGER NOT NULL,

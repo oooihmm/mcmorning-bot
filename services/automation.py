@@ -1,6 +1,7 @@
 """영속 작업 이력과 Discord 기록 복구를 사용하는 단일 프로세스 스케줄러."""
 
 import asyncio
+import io
 import logging
 import re
 from datetime import date, timedelta
@@ -10,6 +11,7 @@ from discord.ext import tasks
 
 from database import connect
 from services import attendance as store
+from services.wake import wake_title, wake_body
 from services.calendar import is_study_day
 from services.rules import EARLY, FULL, LATE, OTHER, at, now_kst
 
@@ -80,13 +82,15 @@ class Automation:
         self.channel(self.settings.morning_channel_id, discord.VoiceChannel)
         self.channel(self.settings.leave_channel_id, discord.TextChannel)
 
-    async def forum_post(self, channel, title, content):
+    async def forum_post(self, channel, title, content, legacy_title=None, post_day=None):
         # Discord 게시 성공 후 DB 저장 전에 종료된 경우 제목으로 복구한다.
         for thread in channel.threads:
-            if thread.name == title and thread.owner_id == self.bot.user.id:
+            if (thread.name in (title, legacy_title) and thread.owner_id == self.bot.user.id
+                    and (post_day is None or thread.created_at.astimezone(at(post_day,0).tzinfo).date()==post_day)):
                 return thread
         async for thread in channel.archived_threads(limit=None):
-            if thread.name == title and thread.owner_id == self.bot.user.id:
+            if (thread.name in (title, legacy_title) and thread.owner_id == self.bot.user.id
+                    and (post_day is None or thread.created_at.astimezone(at(post_day,0).tzinfo).date()==post_day)):
                 return thread
         result = await channel.create_thread(
             name=title, content=content, allowed_mentions=discord.AllowedMentions.none()
@@ -106,8 +110,10 @@ class Automation:
         channel = self.channel(self.settings.wake_channel_id, discord.ForumChannel)
         thread = await self.forum_post(
             channel,
-            f"☀️ {day} 기상 인증",
-            "이 Thread에 첫 메시지를 작성해주세요.\n일반: 08:00까지 기상 / 08:30까지 지각\n늦게 출근 반휴: 09:30 이전 인증 + 09:35 카메라 또는 화면 공유 참여",
+            wake_title(day),
+            wake_body(day),
+            legacy_title=f"☀️ {day} 기상 인증",
+            post_day=day,
         )
         store.save_thread(day, thread.id)
         store.create_daily_attendance(day)
@@ -372,30 +378,45 @@ class Automation:
     async def report(self, day):
         thread_id = store.get_thread(day)
         if thread_id is None:
-            raise RuntimeError(
-                f"{day} 기상 인증 게시글이 없어 출결 댓글을 작성할 수 없습니다."
-            )
-        channel = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(
-            thread_id
-        )
-        if (
-            not isinstance(channel, discord.Thread)
-            or channel.guild.id != self.settings.guild_id
-            or channel.parent_id != self.settings.wake_channel_id
-        ):
-            raise RuntimeError("당일 기상 인증 게시글의 서버·포럼을 확인해주세요.")
-        if channel.archived:
-            await channel.edit(archived=False)
-        pages, current = [], ""
-        for line in attendance_lines(day):
-            if len(current) + len(line) > 1700:
-                pages.append(current)
-                current = ""
-            current += line[:1500] + "\n"
-        pages.append(current)
-        for index, content in enumerate(pages):
-            await self.send_once(channel, day, f"result_{index}", content)
-        store.mark_job(day, "report")
+            raise RuntimeError(f'{day} 기상 인증 게시글이 없어 출결을 작성할 수 없습니다.')
+        thread = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+        if (not isinstance(thread,discord.Thread) or thread.guild.id != self.settings.guild_id
+                or thread.parent_id != self.settings.wake_channel_id):
+            raise RuntimeError('당일 기상 인증 게시글의 서버·포럼을 확인해주세요.')
+        if thread.archived:
+            await thread.edit(archived=False)
+        if thread.name != wake_title(day):
+            await thread.edit(name=wake_title(day))
+        starter = await thread.fetch_message(thread.id)
+        if starter.author.id != self.bot.user.id:
+            raise RuntimeError('봇이 작성한 기상 인증 게시글만 수정할 수 있습니다.')
+        lines = []
+        for row in store.get_attendance(day):
+            name = discord.utils.escape_markdown(row['name']).replace('\n',' ')
+            lines.append(f"{name} | 기상: {row['wake_status'] or '-'} | 영상: {row['video_status'] or '-'} | {row['final_status'] or '미판정'} | 사유: {row['final_reason'] or '-'}")
+        details = '\n'.join(lines) or '출결 관리 대상이 없습니다.'
+        body = wake_body(day)
+        content = body + details
+        embeds, attachments = [], []
+        # Discord 본문 길이를 넘으면 같은 게시글에 상세 내용을 담는다.
+        if len(content)>2000:
+            content = body
+            if len(details)<=5800:
+                chunk = ''
+                for line in lines:
+                    if len(chunk)+len(line)+1>3500:
+                        embeds.append(discord.Embed(description=chunk))
+                        chunk = ''
+                    chunk += line + '\n'
+                if chunk:
+                    embeds.append(discord.Embed(description=chunk))
+            else:
+                content += '전체 출결은 첨부된 출결 결과 파일에서 확인해주세요.'
+                attachments.append(discord.File(io.BytesIO(details.encode('utf-8')),filename=f'{day}-출결.txt'))
+        await starter.edit(content=content,embeds=embeds,attachments=attachments,
+                           allowed_mentions=discord.AllowedMentions.none())
+        store.mark_job(day,'report')
+        store.mark_job(day,'report_body')
 
     async def run_step(self, label, action):
         try:
@@ -444,7 +465,7 @@ class Automation:
                     )
                 if (
                     store.job_status(target, "final") == "done"
-                    and store.job_status(target, "report") != "done"
+                    and store.job_status(target, "report_body") != "done"
                 ):
                     await self.run_step(
                         f"report:{target}", lambda d=target: self.report(d)
